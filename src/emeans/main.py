@@ -1,23 +1,12 @@
-# import numpy as np
-
-# def emeans(data: np.ndarray, centroids: np.ndarray, k: int, batch_size: int):
-#     # At each epoch, shuffle the data and divide it into batches.
-#     rng = np.random.default_rng()
-#     shuffled_data = rng.shuffle(data)
-#     batches = [shuffled_data[i:i+batch_size] for i in range(0, len(shuffled_data), batch_size)]
-
-#     for batch in batches:
-#         assignments = np.zeros(len(batch), dtype=int)
-#         for point in batch:
-#             # For every point in the current batch, choose the closest current center:
-#             closest_idx = np.argmin(np.linalg.norm(point - centroids, axis=1))
-#             # each centroid has its own index, so we can use it to update the centroid.
-#             assignments[closest_idx] += 1
-
 import math
 import random
 import matplotlib.pyplot as plt
 import numpy as np
+
+from sentence_transformers import SentenceTransformer
+from datasets import load_dataset, concatenate_datasets
+from sentence_transformers.base.sampler import _sample_value_str
+import torch
 
 # start from 1D case, then extend to n-dimensional case.
 
@@ -161,33 +150,60 @@ def emeans(data: np.ndarray, k: int, batch_size: int, num_epochs: int, alpha: fl
     return C
 
 def main():
-    random.seed(67) # haha six seven
+    # random.seed(67) # haha six seven
 
-    # three groups near -6, 0, and 6
-    data = [random.gauss(center, 0.5) for center in [-6, 0, 6] for _ in range(40)]
+    # # three groups near -6, 0, and 6
+    # data = [random.gauss(center, 0.5) for center in [-6, 0, 6] for _ in range(40)]
 
-    clusters = emeans_1d(data, k=3, batch_size=20, num_epochs=10, alpha=0.3)
-    centers = sorted(c.cj for c in clusters)
-    print("e-means centers:", [round(c, 2) for c in centers])
+    # clusters = emeans_1d(data, k=3, batch_size=20, num_epochs=10, alpha=0.3)
+    # centers = sorted(c.cj for c in clusters)
+    # print("e-means centers:", [round(c, 2) for c in centers])
 
-    fig, ax = plt.subplots(figsize=(10, 3))
-    colors = ["tab:blue", "tab:orange", "tab:green"]
-    for i, center in enumerate(centers):
-        points = [x for x in data
-                if min(range(3), key=lambda j: abs(x - centers[j])) == i]
-        ax.scatter(points, [0] * len(points), color=colors[i], alpha=0.5, s=35)
-        ax.scatter(center, 0, color="black", marker="x", s=180, linewidths=3,
-                label="Learned center" if i == 0 else None, zorder=3)
-        ax.annotate(f"{center:.2f}", (center, 0), xytext=(0, 18),
-                    textcoords="offset points", ha="center", fontsize=12)
+    # fig, ax = plt.subplots(figsize=(10, 3))
+    # colors = ["tab:blue", "tab:orange", "tab:green"]
+    # for i, center in enumerate(centers):
+    #     points = [x for x in data
+    #             if min(range(3), key=lambda j: abs(x - centers[j])) == i]
+    #     ax.scatter(points, [0] * len(points), color=colors[i], alpha=0.5, s=35)
+    #     ax.scatter(center, 0, color="black", marker="x", s=180, linewidths=3,
+    #             label="Learned center" if i == 0 else None, zorder=3)
+    #     ax.annotate(f"{center:.2f}", (center, 0), xytext=(0, 18),
+    #                 textcoords="offset points", ha="center", fontsize=12)
 
-    ax.set(title="1D e-means with three groups", xlabel="Value")
-    ax.set_yticks([])
-    ax.set_ylim(-0.15, 0.25)
-    ax.spines[["left", "right", "top"]].set_visible(False)
-    ax.legend(loc="upper right")
-    fig.tight_layout()
-    plt.show()
+    # ax.set(title="1D e-means with three groups", xlabel="Value")
+    # ax.set_yticks([])
+    # ax.set_ylim(-0.15, 0.25)
+    # ax.spines[["left", "right", "top"]].set_visible(False)
+    # ax.legend(loc="upper right")
+    # fig.tight_layout()
+    # plt.show()
+
+    model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
+    
+    samples_per_class = 20
+    dataset = load_dataset("fancyzhx/ag_news", split="train")
+    unique_labels = dataset.unique("label")
+
+    samples = [
+        dataset.filter(lambda x: x["label"] == label)
+            .shuffle(seed=42)
+            .select(range(samples_per_class))
+        for label in unique_labels
+    ]
+    all_samples = concatenate_datasets(samples)
+
+    print(all_samples)
+
+    embeddings = model.encode(
+        all_samples["text"],
+        batch_size=10,
+        normalize_embeddings=True,
+        show_progress_bar=True,
+        convert_to_numpy=True
+    )
+    print(embeddings.shape)
+
+    
 
 if __name__ == "__main__":
     main()
