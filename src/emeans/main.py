@@ -149,6 +149,30 @@ def emeans(data: np.ndarray, k: int, batch_size: int, num_epochs: int, alpha: fl
 
     return C
 
+def pca_eig(X, n_components):
+    # center the data (subtract column means)
+    X_centered = X - np.mean(X, axis=0)
+    
+    # compute the covariance matrix
+    cov_matrix = np.cov(X_centered, rowvar=False)
+    
+    # compute eigenvalues and eigenvectors (returned in ascending order)
+    eigenvalues, eigenvectors = np.linalg.eigh(cov_matrix)
+    
+    # sort eigenvalues and eigenvectors in descending order
+    sorted_idx = np.argsort(eigenvalues)[::-1]
+    eigenvalues = eigenvalues[sorted_idx]
+    eigenvectors = eigenvectors[:, sorted_idx]
+    
+    # select top k eigenvectors and project data
+    components = eigenvectors[:, :n_components]
+    X_reduced = np.dot(X_centered, components)
+    
+    # Calculate explained variance ratio
+    explained_variance_ratio = eigenvalues[:n_components] / np.sum(eigenvalues)
+    
+    return X_reduced, explained_variance_ratio
+
 def main():
     # random.seed(67) # haha six seven
 
@@ -180,9 +204,10 @@ def main():
 
     model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
     
-    samples_per_class = 20
+    samples_per_class = 200
     dataset = load_dataset("fancyzhx/ag_news", split="train")
     unique_labels = dataset.unique("label")
+    print(unique_labels)
 
     samples = [
         dataset.filter(lambda x: x["label"] == label)
@@ -196,14 +221,31 @@ def main():
 
     embeddings = model.encode(
         all_samples["text"],
-        batch_size=10,
+        batch_size=32,
         normalize_embeddings=True,
         show_progress_bar=True,
         convert_to_numpy=True
     )
     print(embeddings.shape)
+    np.save("embeddings.npy", embeddings)
 
+    np.save("labels.npy", np.asarray(all_samples["label"]))
+    all_samples.save_to_disk("embedding_samples")
+
+    clusters = emeans(embeddings, k=len(unique_labels), batch_size=10, num_epochs=10, alpha=0.5)
+
+    fig = plt.figure()
+    ax = fig.add_subplot(projection='3d')
+    # plot the clusters
+    pca_clusters, explained_variance_ratio = pca_eig(clusters, 3)
+    print("explained variance ratio:", explained_variance_ratio)
+    # plot the pca embeddings
+    ax.scatter(pca_clusters[:, 0], pca_clusters[:, 1], pca_clusters[:, 2], marker='o', s=16, color='red')
+
+    pca_embeddings, _ = pca_eig(embeddings, 3)
+    ax.scatter(pca_embeddings[:, 0], pca_embeddings[:, 1], pca_embeddings[:, 2], marker='o', s=4, color='blue')
+
+    plt.show()
     
-
 if __name__ == "__main__":
     main()
