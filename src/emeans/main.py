@@ -17,6 +17,7 @@
 import math
 import random
 import matplotlib.pyplot as plt
+import numpy as np
 
 # start from 1D case, then extend to n-dimensional case.
 
@@ -89,6 +90,75 @@ def emeans_1d(data: list[float], k: int, batch_size: int, num_epochs: int, alpha
                         donor_cluster.sj = donor_cluster.cj * donor_cluster.nj
 
     return clusters
+
+# n-dimensional case
+def emeans(data: np.ndarray, k: int, batch_size: int, num_epochs: int, alpha: float, revival_frequency: int = 5, revival_threshold: float = 0.1, perturbation_size: float = 2**-7) -> np.ndarray:
+    data = np.asarray(data, dtype=np.float64)
+
+    rng = np.random.default_rng(seed=420)
+    indices = rng.choice(len(data), size=k, replace=False)
+    C = np.array(data[indices], dtype=np.float64, copy=True)  # centers: (k, d)
+    N = np.full(k, 1e-10)  # counts: (k,)
+    S = np.expand_dims(N, axis=1) * C  # products: (k, d)
+    M = num_epochs * math.ceil(len(data) / batch_size)
+    t = 0
+
+    # Alternating relative offsets, one for each coordinate.
+    perturbation = np.full(C.shape[1], perturbation_size)
+    perturbation[1::2] *= -1
+
+    for epoch in range(num_epochs):
+        # at each epoch, shuffle the data and divide it into batches.
+        indices = rng.permutation(len(data))
+        batched_data = [indices[i:i + batch_size]
+                        for i in range(0, len(data), batch_size)]
+
+        for batch in batched_data:  # x: (batch_size, d)
+            # batch contains indices; X can have fewer rows in the last batch.
+            X = data[batch]
+            # for each x, ||x||^2 is constant across centers. x^2 is also convex so it works out
+            scores = (C * C).sum(axis=1)[None, :] - 2 * (X @ C.T)
+            center_labels = scores.argmin(axis=1)
+
+            batch_counts = np.bincount(center_labels, minlength=k)
+            batch_sums = np.zeros_like(S)
+            np.add.at(batch_sums, center_labels, X)
+
+            # cosine scheduler
+            alpha_t = alpha * (0.1 + 0.9 * (1 + np.cos(t * math.pi / M)) / 2)
+
+            N = (1 - alpha_t) * N + alpha_t * batch_counts
+            S = (1 - alpha_t) * S + alpha_t * batch_sums
+
+            np.divide(S, N[:, None], out=C, where=N[:, None] > 0)  # basically c_j = s_j / n_j
+
+            t += 1
+
+            if t % revival_frequency == 0:
+                for center_idx in range(k):
+                    average_running_count = np.mean(N)
+                    if N[center_idx] < revival_threshold * average_running_count:
+                        # filter mask, equivalent to the condition in the 1D case
+                        donors = np.flatnonzero(
+                            (np.arange(k) != center_idx)
+                            & (N >= revival_threshold * average_running_count)
+                            & (N > 0)
+                        )
+                        weights = N[donors]
+                        donor_cluster = rng.choice(donors, p=weights / weights.sum())
+
+                        donor_cj = C[donor_cluster].copy()
+                        donor_nj = N[donor_cluster]
+
+                        C[center_idx] = donor_cj * (1 + perturbation)
+                        N[center_idx] = donor_nj / 2
+                        S[center_idx] = C[center_idx] * N[center_idx]
+
+                        C[donor_cluster] = donor_cj * (1 - perturbation)
+                        N[donor_cluster] = donor_nj / 2
+                        S[donor_cluster] = C[donor_cluster] * N[donor_cluster]
+
+    return C
 
 def main():
     random.seed(67) # haha six seven
